@@ -1,8 +1,21 @@
+#!/usr/bin/env node
+
 const fs = require('fs'); // Подключаем модуль 'fs' для работы с файловой системой
 const readline = require('readline'); // Подключаем модуль 'readline' для построчного чтения файла
+const yargs = require('yargs'); // Подключаем модуль 'yargs' для работы с аргументами командной строки
+const path = require('path'); // Подключаем модуль 'path' для работы с путями файловой системы
 
 // Указываем IP-адреса для поиска
 const ipAddresses = ['89.123.1.41', '34.48.240.111'];
+
+// Настройка yargs для обработки параметров командной строки
+const options = yargs
+    .usage("Usage: -f <file>")
+    .option("f", { alias: "file", describe: "Path to log file", type: "string", demandOption: true })
+    .argv;
+
+// Путь к файлу логов
+const logFilePath = path.join(__dirname, options.file);
 
 // Создаем потоки записи для каждого IP-адреса
 const outputStreams = ipAddresses.reduce((acc, ip) => {
@@ -20,7 +33,7 @@ function processLine(line) {
 }
 
 // Читаем файл построчно
-const fileStream = fs.createReadStream('./data/access_tmp.log.txt'); // Создаем поток чтения из файла
+const fileStream = fs.createReadStream(logFilePath); // Создаем поток чтения из файла
 const rl = readline.createInterface({
     input: fileStream, // Устанавливаем поток чтения в качестве источника данных для readline
     crlfDelay: Infinity // Настраиваем задержку для корректного распознавания строк
@@ -40,6 +53,4 @@ rl.on('close', () => {
 });
 
 // Обработка ошибок чтения файла
-fileStream.on('error', (err) => {
-    console.error(`Ошибка чтения файла: ${err.message}`); // Выводим сообщение об ошибке, если возникла проблема с чтением файла
-});
+fileStream
