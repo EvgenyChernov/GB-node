@@ -1,138 +1,112 @@
 #!/usr/bin/env node
 
+// Импортируем необходимые модули
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const url = require('url');
-const cluster = require('cluster');
-const os = require('os');
+const express = require('express');
+const socketIO = require('socket.io');
+const cors = require('cors');
 
-const numCPUs = os.cpus().length; // Получаем количество CPU
+// Создаем экземпляр приложения Express
+const app = express();
+// Включаем CORS для всех запросов
+app.use(cors());
 
-// Функция для рендеринга HTML страницы
-function renderHtml(response, content) {
-    response.writeHead(200, { 'Content-Type': 'text/html' });
-    response.write(content);
-    response.end();
-}
-
-// Функция для показа содержимого директории
-function showDirectory(response, directoryPath) {
-    console.log(`Чтение директории: ${directoryPath}`);
-    fs.readdir(directoryPath, (err, files) => {
+// Обрабатываем GET-запрос к корневому маршруту
+app.get('/', (req, res) => {
+    // Читаем содержимое текущей директории
+    fs.readdir(__dirname, (err, files) => {
+        // Если произошла ошибка, отправляем сообщение об ошибке
         if (err) {
-            console.error(`Ошибка при чтении директории: ${err.message}`);
-            response.writeHead(500, { 'Content-Type': 'text/plain' });
-            response.write('Ошибка при чтении директории');
-            response.end();
+            res.status(500).send('Ошибка при чтении директории');
             return;
         }
 
-        let content = `<h1>Содержимое директории ${directoryPath}</h1><ul>`;
+        // Создаем HTML-контент для отображения списка файлов и директорий
+        let content = `<h1>Содержимое директории ${__dirname}</h1><ul>`;
         files.forEach(file => {
-            const filePath = path.join(directoryPath, file);
+            const filePath = path.join(__dirname, file);
+            // Если это директория, добавляем соответствующую ссылку
             if (fs.lstatSync(filePath).isDirectory()) {
                 content += `<li><a href="?path=${encodeURIComponent(filePath)}">${file}/</a></li>`;
             } else {
+                // Если это файл, добавляем ссылку на файл
                 content += `<li><a href="?file=${encodeURIComponent(filePath)}">${file}</a></li>`;
             }
         });
         content += '</ul>';
-
-        renderHtml(response, content);
+        // Отправляем HTML-контент в ответ на запрос
+        res.send(content);
     });
-}
+});
 
-// Функция для показа содержимого файла
-function showFile(response, filePath) {
-    console.log(`Чтение файла: ${filePath}`);
-    fs.readFile(filePath, 'utf8', (err, data) => {
-        if (err) {
-            console.error(`Ошибка при чтении файла: ${err.message}`);
-            response.writeHead(500, { 'Content-Type': 'text/plain' });
-            response.write('Ошибка при чтении файла');
-            response.end();
-            return;
-        }
-
-        response.writeHead(200, { 'Content-Type': 'text/plain' });
-        response.write(data);
-        response.end();
-    });
-}
-
-if (cluster.isMaster) { // Если текущий процесс является главным (master)
-    console.log(`Главный процесс ${process.pid} запущен`);
-
-    for (let i = 0; i < numCPUs; i++) {
-        cluster.fork(); // Создаем воркеры для каждого CPU
+// Создаем HTTP-сервер на базе приложения Express
+const server = http.createServer(app);
+// Подключаем Socket.IO к серверу и настраиваем CORS
+const io = socketIO(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
     }
+});
 
-    cluster.on('exit', (worker, code, signal) => { // Когда воркер завершает работу
-        console.log(`Воркер ${worker.process.pid} завершился. Перезапуск...`);
-        cluster.fork(); // Перезапускаем воркер
-    });
-} else { // Если текущий процесс является воркером
-    const server = http.createServer((request, response) => { // Создаем HTTP-сервер
-        const queryObject = url.parse(request.url, true).query;
-        console.log(`Запрос получен: ${request.url}`);
+// Инициализируем счетчик посетителей
+let visitorCount = 0;
 
-        if (request.method === 'GET') { // Обработка GET-запросов
-            if (queryObject.path) {
-                showDirectory(response, queryObject.path); // Показать содержимое директории
-            } else if (queryObject.file) {
-                showFile(response, queryObject.file); // Показать содержимое файла
-            } else {
-                showDirectory(response, __dirname); // Показать содержимое текущей директории
-            }
-        } else if (request.method === 'POST') { // Обработка POST-запросов
-            let body = '';
-            request.on('data', chunk => {
-                body += chunk.toString(); // Собираем данные POST-запроса
-            });
-            request.on('end', () => {
-                console.log(`Данные POST: ${body}`);
-                response.writeHead(200, { 'Content-Type': 'application/json' });
-                response.end(JSON.stringify({ status: 'success', data: body }));
-            });
-        } else {
-            response.writeHead(405, { 'Content-Type': 'text/plain' });
-            response.end('Метод не разрешен');
-        }
+// Обрабатываем событие подключения нового клиента
+io.on('connection', (socket) => {
+    // Генерируем уникальное имя пользователя
+    const userName = `User${Math.floor(Math.random() * 1000)}`;
+    // Увеличиваем счетчик посетителей
+    visitorCount++;
+    // Отправляем всем клиентам обновленное количество посетителей
+    io.emit('VISITOR_COUNT', { count: visitorCount });
+
+    // Уведомляем остальных клиентов о новом подключении
+    socket.broadcast.emit('NEW_CONN_EVENT', { msg: `${userName} подключился` });
+
+    // Обрабатываем событие отключения клиента
+    socket.on('disconnect', () => {
+        // Уменьшаем счетчик посетителей
+        visitorCount--;
+        // Отправляем всем клиентам обновленное количество посетителей
+        io.emit('VISITOR_COUNT', { count: visitorCount });
+        // Уведомляем остальных клиентов об отключении
+        socket.broadcast.emit('NEW_CONN_EVENT', { msg: `${userName} отключился` });
     });
 
-    const PORT = 3000;
-    server.listen(PORT, () => {
-        console.log(`Воркер ${process.pid} слушает порт ${PORT}`);
+    // Обрабатываем сообщение от клиента
+    socket.on('CLIENT_MSG', (data) => {
+        // Отправляем сообщение всем клиентам
+        io.emit('SERVER_MSG', { user: userName, msg: data.msg });
     });
+});
 
-    server.on('error', (err) => { // Обработка ошибок сервера
-        console.error(`Ошибка сервера: ${err.message}`);
-    });
-}
+// Настраиваем сервер на прослушивание порта 3000
+server.listen(3000, () => {
+    console.log('Сервер слушает порт 3000');
+});
+
+// Обрабатываем ошибки сервера
+server.on('error', (err) => {
+    console.error(`Ошибка сервера: ${err.message}`);
+});
 
 /**
  * Последовательность запуска:
- * 1. Запуск скрипта и проверка, является ли процесс главным.
- * 2. В главном процессе (master):
- *    - Создание воркеров с помощью cluster.fork().
- *    - Прослушивание событий выхода воркеров и их перезапуск.
- * 3. В воркерах:
- *    - Создание HTTP-сервера.
- *    - Обработка GET-запросов:
- *      - Вызов showDirectory для отображения содержимого директории.
- *      - Вызов showFile для отображения содержимого файла.
- *    - Обработка POST-запросов:
- *      - Чтение данных из запроса.
- *      - Возврат данных в формате JSON.
- *    - Обработка других методов с возвращением статуса 405.
- * 4. Функция showDirectory:
- *    - Чтение содержимого указанной директории.
+ * 1. Запуск скрипта и создание HTTP-сервера на базе Express.
+ * 2. Настройка CORS для всех запросов.
+ * 3. Обработка GET-запросов:
+ *    - Чтение содержимого текущей директории.
  *    - Формирование HTML-контента для списка файлов и директорий.
- *    - Вызов функции renderHtml для отправки ответа.
- * 5. Функция showFile:
- *    - Чтение содержимого указанного файла.
- *    - Отправка содержимого файла в ответ.
- * 6. Функция renderHtml:
- *    - Формирование и отправка HTML-ответа клиенту.
+ *    - Отправка HTML-контента в ответ.
+ * 4. Создание экземпляра Socket.IO для обработки WebSocket-соединений.
+ * 5. Обработка событий подключения и отключения WebSocket-клиентов:
+ *    - Увеличение/уменьшение счетчика посетителей.
+ *    - Отправка обновленного количества посетителей всем клиентам.
+ *    - Уведомление остальных клиентов о подключении/отключении пользователя.
+ *    - Обработка сообщений от клиентов и их рассылка всем подключенным клиентам.
+ * 6. Запуск сервера на прослушивание порта 3000.
+ * 7. Обработка ошибок сервера.
  */

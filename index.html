@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Socket App</title>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+<div>Посетителей на сайте: <span id="visitor-count">0</span></div>
+<input type="text" id="input" autofocus>
+<input type="submit" id="send" value="Send">
+<div id="messages"></div>
+</body>
+<script type="text/javascript">
+    const socket = io('http://localhost:3000');
+
+    const addMessage = (msg) => {
+        const msgDiv = document.createElement('div');
+        msgDiv.innerHTML = msg;
+        document.getElementById('messages').appendChild(msgDiv);
+    };
+
+    socket.on('connect', () => {
+        console.log('Успешное соединение с сервером');
+    });
+
+    socket.on('SERVER_MSG', (data) => {
+        addMessage(`<b>${data.user}:</b> ${data.msg}`);
+    });
+
+    socket.on('NEW_CONN_EVENT', (data) => {
+        addMessage(`<i>${data.msg}</i>`);
+    });
+
+    socket.on('VISITOR_COUNT', (data) => {
+        document.getElementById('visitor-count').innerText = data.count;
+    });
+
+    document.getElementById('send').onclick = function() {
+        socket.emit('CLIENT_MSG', { msg: document.getElementById('input').value });
+        document.getElementById('input').value = '';
+    };
+</script>
+</html>
+
